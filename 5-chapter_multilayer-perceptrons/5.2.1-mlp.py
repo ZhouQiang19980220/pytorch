@@ -5,40 +5,28 @@ from d2l import torch as d2l
 # %% 单隐藏层感知机从 0 实现
 
 
-class MLP():
+class MLPScratch(d2l.Classifier):
+    def __init__(self, num_inputs, num_outputs, num_hiddens, lr, sigma=0.01):
+        super().__init__()
+        self.save_hyperparameters()
+        self.W1 = nn.Parameter(torch.randn(num_inputs, num_hiddens) * sigma)
+        self.b1 = nn.Parameter(torch.zeros(num_hiddens))
+        self.W2 = nn.Parameter(torch.randn(num_hiddens, num_outputs) * sigma)
+        self.b2 = nn.Parameter(torch.zeros(num_outputs))
 
-    def __init__(
-        self,
-        input_dim: int,
-        hidden_dim: int,
-        output_dim: int
-    ) -> None:
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
-        self.init_param()
+def relu(X):
+    a = torch.zeros_like(X)
+    return torch.max(X, a)
 
-    def init_param(self, ) -> None:
-        self.W1 = nn.Parameter(
-            torch.randn(self.input_dim, self.hidden_dim)
-        )
-        self.b1 = nn.Parameter(
-            torch.randn(self.hidden_dim)
-        )
-        self.W2 = nn.Parameter(
-            torch.randn(self.hidden_dim, self.output_dim)
-        )
-        self.b2 = nn.Parameter(
-            torch.randn(self.output_dim)
-        )
-        self.params = [self.W1, self.b1, self.W2, self.b2]
+@d2l.add_to_class(MLPScratch)
+def forward(self, X):
+    X = X.reshape((-1, self.num_inputs))
+    H = relu(torch.matmul(X, self.W1) + self.b1)
+    return torch.matmul(H, self.W2) + self.b2
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x.reshape(-1, self.input_dim)
-        # h.shape = (batch_size, hidden_dim)
-        h = torch.relu(
-            torch.add(torch.matmul(x, self.W1), self.b1)
-        )
-        # o.shape = (batch_size, output_dim)
-        o = torch.add(torch.matmul(h, self.W2), self.b2)
-        return o
+model = MLPScratch(num_inputs=784, num_outputs=10, num_hiddens=256, lr=0.1)
+data = d2l.FashionMNIST(batch_size=256)
+trainer = d2l.Trainer(max_epochs=10, num_gpus=1)
+trainer.fit(model, data)
+
+#%%
