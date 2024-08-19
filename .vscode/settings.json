@@ -1,3 +1,4 @@
 {
-    "python.languageServer": "Jedi"
+    "python.languageServer": "Jedi",
+    "python.terminal.executeInFileDir": true
 }
