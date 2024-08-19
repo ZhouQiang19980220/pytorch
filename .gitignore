@@ -1,0 +1,57 @@
+# 操作系统生成的文件
+.DS_Store
+Thumbs.db
+
+# 编译器生成的文件
+*.class
+*.o
+*.so
+*.dll
+*.exe
+
+# 编辑器生成的文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.venv
+
+# Java
+*.jar
+*.war
+*.ear
+
+# Logs
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.save
+
+# 其他
+*.iml
+*.ipr
+*.iws
+*.class
+*.project
+*.pydevproject
+*.metadata
+*.classpath
+*.settings/
+*.factorypath
