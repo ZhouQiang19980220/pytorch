@@ -1,16 +1,18 @@
-#%% import libraries
+# %% import libraries
 import torch
 import torch.nn as nn
+from d2l import torch as d2l
+# %% 单隐藏层感知机从 0 实现
 
-#%% 单隐藏层感知机从 0 实现
+
 class MLP():
 
     def __init__(
-        self, 
+        self,
         input_dim: int,
         hidden_dim: int,
         output_dim: int
-        ) -> None:
+    ) -> None:
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
@@ -32,17 +34,11 @@ class MLP():
         self.params = [self.W1, self.b1, self.W2, self.b2]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.reshape(-1, self.input_dim)
+        # h.shape = (batch_size, hidden_dim)
         h = torch.relu(
-            torch.add(torch.matmul(x, self.W1), self.b1)`` 
+            torch.add(torch.matmul(x, self.W1), self.b1)
         )
+        # o.shape = (batch_size, output_dim)
         o = torch.add(torch.matmul(h, self.W2), self.b2)
         return o
-
-# %%
-if __name__ == "__main__":
-    mlp = MLP(2, 3, 4)
-    for p in mlp.params:
-        print(f'{p.shape=}:')
-
-#%%
-pass
