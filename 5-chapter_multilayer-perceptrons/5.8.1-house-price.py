@@ -1,25 +1,33 @@
-#%% import libraries
+# %% import libraries
 import os
 import sys
 import torch
 import pandas as pd
 from loguru import logger
 from d2l import torch as d2l
-#%% 设置显示的日志级别
+# %% 设置显示的日志级别
+
+
 def set_log_level(level='INFO'):
     logger.remove()
     logger.add(sys.stdout, level=level)
+
+
 level = 'INFO'
 set_log_level(level)
-#%% load dataset
+# %% load dataset
 data_dir = '../data'
 train_file = 'kaggle_house_pred_train.csv'
 test_file = 'kaggle_house_pred_test.csv'
-def all_exists(data_dir, **files):
+
+
+def all_exists(data_dir, *files):
     for file in files:
         if not os.path.exists(os.path.join(data_dir, file)):
             return False
     return True
+
+
 download = not all_exists(data_dir, *[train_file, test_file])   # 如果数据集不存在，则下载
 if download:    # 下载数据集
     logger.info('Downloading data...')
@@ -38,9 +46,9 @@ logger.debug(f'{raw_test_data.shape=}')
 # 查看一些数据
 logger.debug(
     # 0: Id, (不能作为特征)
-    # 1: MSSubClass, 
-    # 2: MSZoning, 
-    # 3: LotFrontage, 
+    # 1: MSSubClass,
+    # 2: MSZoning,
+    # 3: LotFrontage,
     # -3: SaleType,
     # -2: SaleCondition,
     # -1: SalePrice
@@ -70,22 +78,20 @@ all_features[numeric_features] = all_features[numeric_features].fillna(0)
 
 # 4. 处理离散数值特征: one-hot 编码
 all_features = pd.get_dummies(all_features, dummy_na=True)
-logger.debug(f'{all_features.shape=}')
-#%%
+logger.debug(f'{all_features.shape=}')  # (num, 331)
+# %%
 # 将数据转换为张量
 logger.info('Converting data to tensor...')
 n_train = train_data.shape[0]
 train_features = torch.tensor(
     all_features[:n_train].values.astype(float), dtype=torch.float32
-    )
+)
 test_features = torch.tensor(
     all_features[n_train:].values.astype(float), dtype=torch.float32
-    )
+)
 
 train_labels = torch.tensor(
     raw_train_data.SalePrice.values.astype(float), dtype=torch.float32
-    )
+)
 
-#%%
-
-
+# %%
