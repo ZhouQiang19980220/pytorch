@@ -2,13 +2,17 @@
 vgg
 """
 # %% import libraries
+import os
+from typing import Sequence, Optional
+import warnings
 from loguru import logger
+import objprint
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-import torch.optim as optim
+from torch.optim import SGD
 
 # %% define VGG
 
@@ -191,28 +195,50 @@ def get_device():
     else:
         return torch.device('cpu')
 
+def get_num_workers():
+    """
+    获取num_workers
+    """
+    if torch.cuda.is_available():
+        return 4
+    else:
+        return 0
 
-if __name__ == "__main__":
-    # test_vgg11()
-    # 在 Fashion MNIST 数据集上训练和测试 MiniVGG11
-    # 0. 定义超参数
-    batch_size = 64
-    num_epochs = 10
-    optimizer_name = 'SGD'
-    optimizer_params = {
-        'lr': 0.01,
-        'momentum': 0.9,
-        'weight_decay': 5e-4
-    }
-    model_name = 'MiniVGG11'
-    model_params = {
-        'in_channels': 1,
-        'num_classes': 10
-    }
-    device = get_device()
-    logger.info(f'device: {device}')
+def get_model(
+    model_name: str,
+    model_params: dict,
+):
+    """
+    根据模型名和参数获取模型
+    """
+    supported_models = (
+        'VGG11', 'VGG13', 'VGG16', 'VGG19',
+        'MiniVGG11', 'MiniVGG13', 'MiniVGG16', 'MiniVGG19'
+    )
+    if model_name not in supported_models:
+        raise ValueError(f'Unsupported model: {model_name}')
+    return eval(model_name)(**model_params)
 
-    # 1. 获取数据集
+def get_optimizer(
+    optimizer_name: str,
+    optimizer_params: dict,
+    model: nn.Module
+):
+    """
+    根据优化器名和参数获取优化器
+    """
+    supported_optimizers = ('SGD')
+    if optimizer_name not in supported_optimizers:
+        raise ValueError(f'Unsupported optimizer: {optimizer_name}')
+    return eval(optimizer_name)(model.parameters(), **optimizer_params)
+
+def get_fashion_mnist_dataset(
+    batch_size: int,
+    num_workers: int
+):
+    """
+    获取Fashion MNIST数据集
+    """
     train_phases = ['train', 'valid']
     transform = {
         'train': transforms.Compose([
@@ -232,60 +258,266 @@ if __name__ == "__main__":
     }
 
     dataloader = {
-        p: DataLoader(dataset[p], batch_size=batch_size,
-                      shuffle=(p == 'train'))
+        p: DataLoader(dataset[p], batch_size=batch_size, shuffle=(p == 'train'), num_workers=num_workers)
         for p in train_phases
     }
 
-    # 2. 定义模型
-    if model_name == 'MiniVGG11':
-        model = MiniVGG11(**model_params)
+    return dataloader
+
+def save_model(
+    model: nn.Module,
+    save_dir: str,
+    save_name: str,
+    force: bool = False
+):
+    """
+    保存模型
+    """
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if os.path.exists(os.path.join(save_dir, save_name)):
+        if force:
+            warnings.warn(f'{os.path.join(save_dir, save_name)} exists, but force is True, so overwrite it')
+            torch.save(model.state_dict(), os.path.join(save_dir, save_name))
+        else:
+            warnings.warn(f'{os.path.join(save_dir, save_name)} exists, set force=True to overwrite it')
     else:
-        raise ValueError(f'Unsupported model: {model_name}')
-    model.to(device)
+        torch.save(model.state_dict(), os.path.join(save_dir, save_name))
 
-    # 3. 定义损失函数
-    criterion = nn.CrossEntropyLoss()
+class Metric():
 
-    # 4. 定义优化器
-    if optimizer_name == 'SGD':
-        optimizer = optim.SGD(model.parameters(), **optimizer_params)
-    else:
-        raise ValueError(f'Unsupported optimizer: {optimizer_name}')
+    def __init__(
+        self, 
+        metric_names: Sequence[str],
+    ):  
+        if isinstance(metric_names, (str, Sequence)):
+            if isinstance(metric_names, str):
+                metric_names = [metric_names]
+        else:
+            raise TypeError(f'metric_names should be str or Sequence, but got {type(metric_names)}')
+        
+        self.metric_names = metric_names
+        self.metrics = dict()
+        for metric_name in metric_names:
+            self.metrics[metric_name] = []
 
-    # 5. 训练模型
-    for epoch in range(num_epochs):
-        for phase in train_phases:
-            if phase == 'train':
-                model.train()
-            else:
-                model.eval()
+    def append(
+        self, 
+        metric_names: Sequence[str],
+        metric
+    ):
+        for metric_name in metric_names:
+            assert metric_name in self.metric_names, f'{metric_name} not in {self.metric_names}'
+            self.metrics[metric_name].append(metric)
 
-            running_loss = 0.0
-            running_corrects = 0
-            running_counts = 0
-            for inputs, labels in dataloader[phase]:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                optimizer.zero_grad()
+    def append_all(
+        self, 
+        metrics: dict
+    ):
+        for metric_name in self.metric_names:
+            self.metrics[metric_name].append(metrics[metric_name])
+    
+    def get(self, metric_name: str):
+        return self.metrics[metric_name]
 
-                with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels)
-                    _, preds = torch.max(outputs, 1)
+    def get_all(self):
+        return self.metrics
 
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+    def get_last(self, metric_name: str):
+        return self.metrics[metric_name][-1]
 
-                    running_loss += loss.item() * inputs.size(0)
-                    running_corrects += torch.sum(preds == labels.data)
-                    running_counts += inputs.size(0)
-        logger.info(
-            get_log_string(
-                epoch,
-                num_epochs,
-                phase,
-                running_loss / running_counts,
-                running_corrects / running_counts)
+    def get_last_all(self):
+        return {metric_name: self.metrics[metric_name][-1] for metric_name in self.metric_names}
+
+    def get_max(self, metric_name: str):
+        max_value, max_index = max((value, index) for index, value in enumerate(self.metrics[metric_name]))
+        return max_value, max_index
+
+    def get_min(self, metric_name: str):
+        min_value, min_index = min((value, index) for index, value in enumerate(self.metrics[metric_name]))
+        return min_value, min_index
+
+    def get_best(self, metric_name: str, good=True):
+        if good:
+            return self.get_max(metric_name)
+        else:
+            return self.get_min(metric_name)
+
+
+    def __repr__(self):
+        return objprint.obj2str(self.metrics)
+    
+    __str__ = __repr__
+
+
+if __name__ == "__main__":
+    # test_vgg11()
+    # 在 Fashion MNIST 数据集上训练和测试 MiniVGG11
+    # 定义训练配置
+    train_config = dict(
+        model_name = 'MiniVGG11', 
+        model_params = {
+            'in_channels': 1,
+            'num_classes': 10
+        }, 
+        optimizer_name = 'SGD', 
+        optimizer_params = {
+            'lr': 0.005,
+            'momentum': 0.9,
+            'weight_decay': 5e-4
+        },
+        get_dataset = get_fashion_mnist_dataset, 
+        get_dataset_params = {
+            'batch_size': 64,
+            'num_workers': get_num_workers()
+        }, 
+        num_epochs = 10,
+        patience = 10,
+        log_interval = 1, 
+        device = get_device(), 
+        save = False, 
+        save_interval = 1,
+        save_params = {
+            'save_dir': '../models/mini_vgg11_fashion_mnist',
+            'force': False
+        }
+    )
+    logger.info(f'train_config: \n{objprint.objstr(train_config)}')
+
+    def train(
+        model_name: str,
+        model_params: dict,
+        optimizer_name: str,
+        optimizer_params: dict,
+        num_epochs: int,
+        patience: int,
+        log_interval: int,
+        device: torch.device,
+        get_dataset: callable,
+        get_dataset_params: dict,
+        save: bool,
+        save_interval: Optional[int] = None,
+        save_params: Optional[int] = None
+    ):
+        """
+        训练模型
+        Args:
+            model_name: 模型名
+            model_params: 模型参数
+            optimizer_name: 优化器名
+            optimizer_params: 优化器参数
+            num_epochs: 训练轮数
+            patience: int, 早停轮数
+            log_interval: 日志间隔
+            device: 设备
+            get_dataset: 获取数据集的函数
+            get_dataset_params: 获取数据
+            save: bool, # 是否保存模型
+            save_interval: Optional[int] = None,    # 保存间隔
+            save_params: Optional[int] = None   # 保存参数
+        """
+        # 检查参数
+        if save:
+            assert save_interval is not None, 'save_interval should not be None when save is True'
+            assert save_params is not None, 'save_params should not be None when save is True'
+        
+        # 初始配置
+        train_phases = ['train', 'valid']
+        loss_metric = Metric(
+            metric_names = train_phases
         )
+        acc_metric = Metric(
+            metric_names = train_phases
+        )
+
+        # # 1. 获取数据集
+        dataloader = get_dataset(**get_dataset_params)
+
+        # # 2. 定义模型
+        model = get_model(model_name, model_params)
+        model.to(device)
+
+        # # 3. 定义损失函数
+        criterion = nn.CrossEntropyLoss()
+
+        # # 4. 定义优化器
+        optimizer = get_optimizer(optimizer_name, optimizer_params, model)
+        
+        best_acc = 0.0
+        # # 5. 训练模型
+        for epoch in range(num_epochs):
+            for phase in train_phases:
+                if phase == 'train':
+                    model.train()
+                else:
+                    model.eval()
+
+                running_loss = 0.0
+                running_corrects = 0
+                running_counts = 0
+                for inputs, labels in dataloader[phase]:
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+                    optimizer.zero_grad()
+
+                    with torch.set_grad_enabled(phase == 'train'):
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
+                        _, preds = torch.max(outputs, 1)
+
+                        if phase == 'train':
+                            loss.backward()
+                            optimizer.step()
+
+                        running_loss += loss.item() * inputs.size(0)
+                        running_corrects += torch.sum(preds == labels.data).item()
+                        running_counts += inputs.size(0)
+                loss_metric.append([phase], running_loss / running_counts)
+                acc_metric.append([phase], running_corrects / running_counts)
+                if phase == 'valid':
+                    if running_corrects / running_counts > best_acc:
+                        best_acc = running_corrects / running_counts
+                        patience_count = 0
+                    else:
+                        patience_count += 1
+                    if patience_count >= patience:
+                        logger.info(f'early stopping at epoch {epoch+1}')
+                        return loss_metric, acc_metric
+                if (epoch+1) % log_interval == 0:
+                    logger.info(
+                        get_log_string(
+                            epoch,
+                            num_epochs,
+                            phase,
+                            running_loss / running_counts,
+                            running_corrects / running_counts)
+                    )
+            if save and (epoch+1) % save_interval == 0:
+                save_name = f'{model_name}_{epoch+1}.pth'
+                save_model(model, save_name=save_name, **save_params)
+                logger.info(f'saved model {save_name}')
+
+        return loss_metric, acc_metric
+    loss_metric, acc_metric = train(**train_config)
+    
+    # 打印最好的结果, 以val_acc 为准
+    _, best_valid_acc_epoch = acc_metric.get_best('valid', good=True)
+    logger.info(f'best results is at epoch {best_valid_acc_epoch}')
+    logger.info(
+        get_log_string(
+            best_valid_acc_epoch,
+            100, 
+            'train',
+            loss_metric.get('train')[best_valid_acc_epoch], 
+            acc_metric.get('train')[best_valid_acc_epoch]
+        )
+    )
+    logger.info(
+        get_log_string(
+            best_valid_acc_epoch,
+            100,
+            'valid',
+            loss_metric.get('valid')[best_valid_acc_epoch], 
+            acc_metric.get('valid')[best_valid_acc_epoch]
+        )
+    )
