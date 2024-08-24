@@ -56,3 +56,6 @@ __pycache__/
 *.classpath
 *.settings/
 *.factorypath
+
+# 数据集
+data/
