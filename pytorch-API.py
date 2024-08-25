@@ -71,7 +71,7 @@ torch.row_stack((x, y)), torch.vstack((x, y))
 torch.hsplit(x, 2), torch.split(x, 1, dim=1)
 
 #%% 垂直分割
-torch.vsplit(x, 3), torch.split(x, 1, dim=0)
+torch.vsplit(x, 2), torch.split(x, 1, dim=0)
 
 #%% 调整张量形状
 x = torch.tensor([[1, 2], [3, 4], [5, 6]])
@@ -149,4 +149,8 @@ torch.frac(x)
 # %% 将 nan 替换为指定值
 x = torch.tensor([1., float('nan'), 3., float('inf'), float('-inf')])
 torch.nan_to_num(x, nan=0, posinf=1, neginf=-1)
-# %%
+# %% 将 tensor 转换为 Python list 或者 numpy array
+tensor = torch.tensor([1, 2, 3])
+tensor.tolist(), tensor.numpy()
+
+#%%
