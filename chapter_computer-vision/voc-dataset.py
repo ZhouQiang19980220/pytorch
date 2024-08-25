@@ -56,10 +56,12 @@ class MyVOCSegDataset(torch.utils.data.Dataset):
         self, 
         voc_dir: str,
         is_train: bool = True,
+        transform = None, 
     ):
         self.voc_dir = voc_dir
         self.img_dir = os.path.join(voc_dir, 'JPEGImages')
         self.label_dir = os.path.join(voc_dir, 'SegmentationClass')
+        self.transform = transform
         
         txt_fname = os.path.join(voc_dir, 'ImageSets/Segmentation/', 'train.txt' if is_train else 'val.txt')
 
@@ -73,7 +75,11 @@ class MyVOCSegDataset(torch.utils.data.Dataset):
         fname = self.images[idx]
         img = os.path.join(self.img_dir, f'{fname}.jpg')
         label = os.path.join(self.label_dir, f'{fname}.png')
-        return Image.open(img).convert('RGB'), Image.open(label).convert('RGB')
+        img = Image.open(img).convert('RGB')
+        label = Image.open(label).convert('RGB')
+        if self.transform:
+            img, label = self.transform((img, label))
+        return img, label
             
 # 测试自定义的数据集
 class TestMyVOCSegDataset(unittest.TestCase):
@@ -92,7 +98,7 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed) 
 
 #%% 定义用于分割任务的 trans
-class SegTransforms:
+class SegTransform:
     """
     定义用于分割任务的图像增强
     关键在于对 image 和 label 应用参数相同的 transform
@@ -104,7 +110,7 @@ class SegTransforms:
 
 
     def __call__(self, img, label):
-        seed = torch.random.seed()
+        seed = torch.randint(0, 2**32-1, (1, )).item()
         set_seed(seed)
 
         img = self.trans(img)
@@ -135,6 +141,8 @@ def main():
         SegTransform(color_trans, only_image=True),
         SegTransform(transforms.ToTensor(), only_image=False),
     ])
+
+
 
     voc_dir = '../data/VOCdevkit/VOC2012/'
     training_dataset = MyVOCSegDataset(voc_dir, is_train=True, transform=training_trans)
