@@ -14,6 +14,9 @@ from torchvision import transforms
 from matplotlib import pyplot as plt
 import numpy as np
 from PIL import Image
+
+# interactive mode
+plt.ion()
 #%%
 # 这里将全部的图片读取到内存中, 是因为VOC数据集比较小
 # 如果数据集比较大, 可以使用生成器, 每次读取一个batch的数据
@@ -109,12 +112,14 @@ class SegTransform:
         self.only_image = only_image
 
 
-    def __call__(self, img, label):
+    def __call__(self, sample_tuple):
+        img, label = sample_tuple
         seed = torch.randint(0, 2**32-1, (1, )).item()
         set_seed(seed)
 
         img = self.trans(img)
         if not self.only_image:
+            set_seed(seed)  # 确保 label 使用相同的随机种子
             label = self.trans(label)
 
         return img, label
@@ -131,7 +136,8 @@ def main():
 
     # 定义颜色变换，单独应用于 image
     color_trans = transforms.Compose([
-        transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
+        # 分别表示亮度、对比度、饱和度、色调的变化范围
+        transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.01),
     ])
 
     # 定义转换
@@ -153,7 +159,8 @@ def main():
     plt.imshow(img.permute(1, 2, 0))
     plt.subplot(122)
     plt.imshow(label.permute(1, 2, 0))
-    plt.set_axis('off')
+    # 关闭坐标轴
+    plt.axis('off')
     # test_dataset = MyVOCSegDataset(voc_dir, is_train=False)
 
 
