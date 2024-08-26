@@ -15,8 +15,6 @@ from matplotlib import pyplot as plt
 import numpy as np
 from PIL import Image
 
-# interactive mode
-plt.ion()
 #%%
 # 这里将全部的图片读取到内存中, 是因为VOC数据集比较小
 # 如果数据集比较大, 可以使用生成器, 每次读取一个batch的数据
@@ -54,6 +52,18 @@ class MyVOCSegDataset(torch.utils.data.Dataset):
     """
     自定义的 VOC 数据集
     """
+    VOC_COLORMAP = [[0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0],
+                [0, 0, 128], [128, 0, 128], [0, 128, 128], [128, 128, 128],
+                [64, 0, 0], [192, 0, 0], [64, 128, 0], [192, 128, 0],
+                [64, 0, 128], [192, 0, 128], [64, 128, 128], [192, 128, 128],
+                [0, 64, 0], [128, 64, 0], [0, 192, 0], [128, 192, 0],
+                [0, 64, 128]]
+
+    #@save
+    VOC_CLASSES = ['background', 'aeroplane', 'bicycle', 'bird', 'boat',
+                'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
+                'diningtable', 'dog', 'horse', 'motorbike', 'person',
+                'potted plant', 'sheep', 'sofa', 'train', 'tv/monitor']
 
     def __init__(
         self, 
@@ -80,9 +90,33 @@ class MyVOCSegDataset(torch.utils.data.Dataset):
         label = os.path.join(self.label_dir, f'{fname}.png')
         img = Image.open(img).convert('RGB')
         label = Image.open(label).convert('RGB')
+        
         if self.transform:
             img, label = self.transform((img, label))
+        label = self.voc_label_indices(label, self.voc_colormap2label)
+
+        
         return img, label
+
+    @property
+    def voc_colormap2label(self, ):
+        """Build the mapping from RGB to class indices for VOC labels."""
+        VOC_COLORMAP = self.VOC_COLORMAP
+        colormap2label = torch.zeros(256 ** 3, dtype=torch.long)
+        for i, colormap in enumerate(VOC_COLORMAP):
+            colormap2label[
+                (colormap[0] * 256 + colormap[1]) * 256 + colormap[2]] = i
+        return colormap2label
+
+    def voc_label_indices(self, colormap, colormap2label):
+        """Map any RGB values in VOC labels to their class indices."""
+        colormap = colormap.permute(1, 2, 0).numpy().astype('int32')
+        # idx.shape = (height, width)
+        idx = ((colormap[:, :, 0] * 256 + colormap[:, :, 1]) * 256
+            + colormap[:, :, 2])
+        # print(f'idx.shape = {idx.shape}')
+        # print(f'colormap.shape = {colormap.shape}')
+        return colormap2label[idx]
             
 # 测试自定义的数据集
 class TestMyVOCSegDataset(unittest.TestCase):
@@ -126,6 +160,8 @@ class SegTransform:
 
 #%%
 def main():
+    # interactive mode
+    plt.ion()
     # 定义几何变换，同时应用于 image 和 label
     geo_trans = transforms.Compose([
         transforms.RandomResizedCrop(size=224), 
@@ -150,7 +186,7 @@ def main():
 
 
 
-    voc_dir = '../data/VOCdevkit/VOC2012/'
+    voc_dir = 'data/VOCdevkit/VOC2012/'
     training_dataset = MyVOCSegDataset(voc_dir, is_train=True, transform=training_trans)
 
     # 测试数据集
