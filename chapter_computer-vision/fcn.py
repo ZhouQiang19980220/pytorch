@@ -3,6 +3,7 @@
 """
 
 #%% import libraries
+import os
 import functools
 import torch
 from torch import nn
@@ -13,7 +14,11 @@ import lightning as pl
 from d2l import torch as d2l
 from loguru import logger
 
-from vocdataset import MyVOCSegDataset, SegTransform
+from vocdataset import BaseSegTransform, SegRandomResizedCrop, SegToTensor
+from vocdataset import MyVOCSegDataset
+
+from matplotlib import pyplot as plt
+from tqdm import tqdm
 #%% 定义双线性插值层
 
 #%% define the FCN model
@@ -66,31 +71,23 @@ def get_voc_dataloader(
     voc_dir: str = '../data/VOCdevkit/VOC2012', 
     batch_size=32, 
     num_workers = 4):
-    geo_trans = transforms.Compose([
-        transforms.RandomResizedCrop(size=224), 
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.RandomRotation(15)
+    training_trans = [SegRandomResizedCrop((224, 224))]
+    training_trans.extend([
+        BaseSegTransform(transforms.RandomHorizontalFlip()),
+        BaseSegTransform(transforms.RandomVerticalFlip()),
+    ])
+    training_trans.extend([
+        BaseSegTransform(transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.01), only_image=True),
+        SegToTensor(), 
+        BaseSegTransform(transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), only_image=True)
     ])
 
-    # 定义颜色变换，单独应用于 image
-    color_trans = transforms.Compose([
-        # 分别表示亮度、对比度、饱和度、色调的变化范围
-        transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.01),
-    ])
-
-    # 定义转换
-
-    training_trans = transforms.Compose([
-        SegTransform(geo_trans, only_image=False),
-        SegTransform(color_trans, only_image=True),
-        SegTransform(transforms.ToTensor(), only_image=False),
-    ])
+    training_trans = transforms.Compose(training_trans)
     validate_trans = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor()
+        SegRandomResizedCrop((224, 224)),
+        SegToTensor(),
+        BaseSegTransform(transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), only_image=True)
     ])
-    validate_trans = SegTransform(validate_trans, only_image=False)
     train_dataset = MyVOCSegDataset(voc_dir, is_train=True, transform=training_trans)
     logger.debug('train_dataset loaded, length: %d', len(train_dataset))
     val_dataset = MyVOCSegDataset(voc_dir, is_train=False, transform=validate_trans)
@@ -108,48 +105,92 @@ def get_voc_dataloader(
     }
     return dataloader
 
-def get_lit_fcn():
+def get_nn_fcn():
+    # 使用预训练的 resnet18 作为 backbone
+    # backbone = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
     backbone = torchvision.models.resnet18(pretrained=True)
+    # 去掉最后两层: avgpool 和 fc
     backbone = nn.Sequential(*list(backbone.children())[:-2])
+    # 获取最后一层的输出通道数
     hidden_dim = backbone[-1][-1].bn2.num_features
+    # 定义 FCN 模型
     fcn = FCN(backbone, hidden_dim, num_classes=21)
+    return fcn
+
+def get_lit_fcn():
+    fcn = get_nn_fcn()
     lit_fcn = LitFCN(fcn)
     return lit_fcn
 
+def check_label(label: torch.Tensor):
+    numel = label.numel()
+    for i in range(21):
+        num = (label == i).sum().item()
+        numel -= num
+    numel -= (label == 255).sum().item()
+    if numel != 0:
+        logger.warning(f'numel: {numel}, expected 0')
+
+
 #%% test the FCN model
-torch.set_float32_matmul_precision('medium')
-# 获取数据加载器
-dataloader = get_voc_dataloader(num_workers=127)
-# 获取模型
-lit_fcn = get_lit_fcn()
-# 训练模型
-trainer = pl.Trainer(max_epochs=1, log_every_n_steps=1)
-trainer.fit(lit_fcn, dataloader['train'], dataloader['val'])
+if __name__ == '__main__':
+    ROOT = '/root/pytorch'
+    voc_dir = os.path.join(ROOT, 'data/VOCdevkit/VOC2012')
+    # dataloaders = get_voc_dataloader(voc_dir, batch_size=4, num_workers=0)
+    # plt.ion()
+    # fig, axes = plt.subplots(2, 2, figsize=(6, 6))
+    # axes = axes.flatten()
+    # for batch in dataloaders['train']:
+    #     img, label = batch
+    #     logger.debug(f'{img.shape=}, {label.shape=}')
+    #     logger.debug(f'{img.dtype=}, {label.dtype=}')
+    #     for i in range(4):
+    #         axes[i].imshow(img[i].permute(1, 2, 0))
+    #         axes[i].imshow(label[i], alpha=0.5)
+    #         axes[i].set_title(f'{label[i].shape=}')
+    #         check_label(label[i])
+    #     plt.tight_layout()
+    #     break
 
-#%%
-# 预测部分
-from matplotlib import pyplot as plt
-dataloader = get_voc_dataloader(num_workers=127)
-img, mask = next(iter(dataloader['val']))
-pred = lit_fcn.nn_fcn(img)
-pred = pred.argmax(1)
-img = img.permute(0, 2, 3, 1)
-# mask = mask.permute(0, 2, 3, 1)
-# pred = pred.permute(0, 2, 3, 1)
-img, mask, pred = img[0], mask[0], pred[0]
-img = img.numpy()
-mask = mask.numpy()
-pred = pred.numpy()
+    num_epochs = 10
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.debug(f'{device=}')
+    dataloader = get_voc_dataloader(voc_dir, batch_size=16, num_workers=128)
+    nn_fc = get_nn_fcn()
+    nn_fc.to(device)
+    optimizer = torch.optim.Adam(nn_fc.parameters(), lr=1e-3)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=255)
+    best_loss = float('inf')
+    for epoch in range(num_epochs):
+        training_loss = 0.0
+        training_samples = 0
+        nn_fc.train()
+        for batch in tqdm(dataloader['train'], desc=f'training at {epoch}', leave=False):
+            img, label = batch
+            img, label = img.to(device), label.to(device)
+            output = nn_fc(img)
+            loss_value = loss_fn(output, label)
+            training_loss += loss_value.item() * img.shape[0]
+            training_samples += img.shape[0]
+            optimizer.zero_grad()
+            loss_value.backward()
+            optimizer.step()
+        training_loss /= training_samples
 
-#%%
-# 绘制图像
-import matplotlib.colors as mcolors
-plt.subplot(131)
-plt.imshow(img, cmap='gray', norm=mcolors.Normalize(vmin=img.min(), vmax=img.max()))
-plt.subplot(132)
-plt.imshow(mask, cmap='gray', norm=mcolors.Normalize(vmin=mask.min(), vmax=mask.max()))
-plt.subplot(133)
-plt.imshow(pred, cmap='gray', norm=mcolors.Normalize(vmin=pred.min(), vmax=pred.max()))
-plt.show()
-
+        val_loss = 0.0
+        val_samples = 0
+        nn_fc.eval()
+        for batch in tqdm(dataloader['val'], desc=f'validating at {epoch}', leave=False):
+            img, label = batch
+            img, label = img.to(device), label.to(device)
+            output = nn_fc(img)
+            loss_value = loss_fn(output, label)
+            val_loss += loss_value.item() * img.shape[0]
+            val_samples += img.shape[0]
+        val_loss /= val_samples
+        if val_loss < best_loss:
+            best_loss = val_loss
+            torch.save(nn_fc.state_dict(), 'fcn.pth')
+            logger.info(f'save model to fcn.pth at epoch {epoch}')
+        logger.debug(f'[epoch={epoch:3d}], training_loss={training_loss:.4f}, val_loss={val_loss:.4f}')
 # %%
